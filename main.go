@@ -312,7 +312,7 @@ func main() {
 		})
 	})
 
-	e.Logger.Fatal(e.Start(fmt.Sprintf(":%s", config.GetConfig().Ports)))
+	e.Logger.Fatal(e.Start(fmt.Sprintf(":%s", config.GetConfig().Port)))
 }
 
 func Login(username string, password string, e echo.Context) (bool, error) {
