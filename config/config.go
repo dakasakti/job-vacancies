@@ -10,20 +10,22 @@ import (
 )
 
 type AppConfig struct {
-	Address     string
-	Ports       string
-	Port        string
-	DB_Driver   string
-	DB_Name     string
-	DB_Address  string
-	DB_Port     string
-	DB_Username string
-	DB_Password string
-	FE_Index    uint
-	BE_Index    uint
-	QA_Index    uint
-	PageLimit   string
-	URLFile     string
+	Address        string
+	Ports          string
+	Port           string
+	DB_Driver      string
+	DB_Name        string
+	DB_Address     string
+	DB_Port        string
+	DB_Username    string
+	DB_Password    string
+	FE_Index       uint
+	BE_Index       uint
+	QA_Index       uint
+	PageLimit      string
+	URLFile        string
+	Basic_Username string
+	Basic_Password string
 }
 
 var lock = &sync.Mutex{}
@@ -58,6 +60,9 @@ func initConfig() *AppConfig {
 	config.QA_Index = convertUint(getEnv("QA_INDEX", "2"))
 	config.PageLimit = getEnv("PAGE_LIMIT", "5")
 	config.URLFile = getEnv("URL_FILE", "https://google.com")
+
+	config.Basic_Username = getEnv("BASIC_USERNAME", "root")
+	config.Basic_Password = getEnv("BASIC_PASSWORD", "root")
 
 	fmt.Println(config)
 	return &config

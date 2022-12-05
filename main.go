@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -47,7 +48,7 @@ func main() {
 			"message": "berhasil membuat file",
 			"data":    fmt.Sprintf("%d Kb", size),
 		})
-	})
+	}, middleware.BasicAuth(Login))
 
 	e.GET("/data/update", func(c echo.Context) error {
 		f, err := excelize.OpenFile("export.xlsx")
@@ -210,7 +211,7 @@ func main() {
 		return c.JSON(200, echo.Map{
 			"message": "data berhasil diupdate",
 		})
-	})
+	}, middleware.BasicAuth(Login))
 
 	e.GET("/data/back-end/last", func(c echo.Context) error {
 		var result entities.TimeBackend
@@ -311,5 +312,13 @@ func main() {
 		})
 	})
 
-	e.Logger.Fatal(e.Start(fmt.Sprintf(":%s", config.GetConfig().Port)))
+	e.Logger.Fatal(e.Start(fmt.Sprintf(":%s", config.GetConfig().Ports)))
+}
+
+func Login(username string, password string, e echo.Context) (bool, error) {
+	if username == config.GetConfig().Basic_Username && password == config.GetConfig().Basic_Password {
+		return true, nil
+	}
+
+	return false, errors.New("credentials is not valid")
 }
