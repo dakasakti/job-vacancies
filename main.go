@@ -1,324 +1,512 @@
 package main
 
 import (
-	"errors"
+	"context"
+	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"os"
-	"strconv"
+	"strings"
+	"time"
 
-	"github.com/dakasakti/job-vacancies/config"
-	"github.com/dakasakti/job-vacancies/entities"
+	"github.com/google/uuid"
+	"github.com/jaevor/go-nanoid"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	"github.com/xuri/excelize/v2"
+	"google.golang.org/api/option"
+	"google.golang.org/api/sheets/v4"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+)
+
+type BEJob struct {
+	gorm.Model  `json:"-"`
+	DataID      string    `json:"dataId" gorm:"type:varchar(50);unique"`
+	Date        time.Time `json:"date" gorm:"type:date"`
+	CompanyName string    `json:"companyName" gorm:"type:varchar(255)"`
+	JobPosition string    `json:"jobPosition" gorm:"type:varchar(255)"`
+	WorkType    string    `json:"workType,omitempty" gorm:"type:varchar(50)"`
+	TechStack   string    `json:"techStack" gorm:"type:varchar(255)"`
+	LinkToJob   string    `json:"linkToJob" gorm:"type:varchar(255)"`
+	Industry    string    `json:"industry,omitempty" gorm:"type:varchar(5)"`
+	Status      string    `json:"status" gorm:"type:varchar(10);default:'open'"`
+	JobID       uint      `json:"-"`
+}
+
+type FEJob struct {
+	gorm.Model  `json:"-"`
+	DataID      string    `json:"dataId" gorm:"type:varchar(50);unique"`
+	Date        time.Time `json:"date" gorm:"type:date"`
+	CompanyName string    `json:"companyName" gorm:"type:varchar(255)"`
+	JobPosition string    `json:"jobPosition" gorm:"type:varchar(255)"`
+	WorkType    string    `json:"workType,omitempty" gorm:"type:varchar(50)"`
+	TechStack   string    `json:"techStack" gorm:"type:varchar(255)"`
+	LinkToJob   string    `json:"linkToJob" gorm:"type:varchar(255)"`
+	Industry    string    `json:"industry,omitempty" gorm:"type:varchar(5)"`
+	Status      string    `json:"status" gorm:"type:varchar(10);default:'open'"`
+	JobID       uint      `json:"-"`
+}
+
+type QEJob struct {
+	gorm.Model  `json:"-"`
+	DataID      string    `json:"dataId" gorm:"type:varchar(50);unique"`
+	Date        time.Time `json:"date" gorm:"type:date"`
+	CompanyName string    `json:"companyName" gorm:"type:varchar(255)"`
+	JobPosition string    `json:"jobPosition" gorm:"type:varchar(255)"`
+	WorkType    string    `json:"workType,omitempty" gorm:"type:varchar(50)"`
+	TechStack   string    `json:"techStack" gorm:"type:varchar(255)"`
+	LinkToJob   string    `json:"linkToJob" gorm:"type:varchar(255)"`
+	Industry    string    `json:"industry,omitempty" gorm:"type:varchar(5)"`
+	Status      string    `json:"status" gorm:"type:varchar(10);default:'open'"`
+	JobID       uint      `json:"-"`
+}
+
+var (
+	db *gorm.DB
 )
 
 func main() {
-	db := config.Database()
-	config.AutoMigrate(db)
-
-	e := echo.New()
-	e.Pre(middleware.RemoveTrailingSlash())
-
-	e.GET("/data/create", func(c echo.Context) error {
-		url := config.GetConfig().URLFile
-
-		resp, err := http.Get(url)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		defer resp.Body.Close()
-
-		file, err := os.Create("export.xlsx")
-		if err != nil {
-			return c.JSON(500, echo.Map{
-				"message": "failed export file",
-			})
-		}
-
-		size, _ := io.Copy(file, resp.Body)
-
-		defer file.Close()
-
-		return c.JSON(200, echo.Map{
-			"message": "berhasil membuat file",
-			"data":    fmt.Sprintf("%d Kb", size),
-		})
-	}, middleware.BasicAuth(Login))
-
-	e.GET("/data/update", func(c echo.Context) error {
-		f, err := excelize.OpenFile("export.xlsx")
-		if err != nil {
-			return c.JSON(500, echo.Map{
-				"message": "failed get File excel",
-			})
-		}
-
-		defer func() {
-			if err := f.Close(); err != nil {
-				fmt.Println("gagal close sheet")
-			}
-		}()
-
-		BES, err := f.GetRows("Back-end")
-		if err != nil {
-			fmt.Println(err)
-			return c.JSON(500, echo.Map{
-				"message": "failed get sheets Back-end",
-			})
-		}
-
-		var waktuID uint
-		var counter uint = config.GetConfig().BE_Index
-
-		for i := int(counter); i < len(BES); i++ {
-			counter++
-
-			if len(BES[i]) > 1 {
-				// setData
-				data := entities.BackEnd{
-					ID:            counter,
-					CompanyName:   BES[i][0],
-					JobPosition:   BES[i][1],
-					WorkType:      BES[i][2],
-					TechStack:     BES[i][3],
-					LinkToJob:     BES[i][4],
-					TimeBackendID: waktuID,
-				}
-
-				tx := db.Save(&data)
-				if tx.Error != nil {
-					fmt.Println("ERROR : ", tx.Error.Error())
-				}
-			} else {
-				// setId
-				waktuID = counter
-
-				// setData
-				data := entities.TimeBackend{
-					ID:   counter,
-					Name: BES[i][0],
-				}
-
-				tx := db.Save(&data)
-				if tx.Error != nil {
-					fmt.Println("ERROR : ", tx.Error.Error())
-				}
-			}
-
-		}
-
-		// resetUlang
-		counter = config.GetConfig().FE_Index
-
-		FES, err := f.GetRows("Front-end")
-		if err != nil {
-			fmt.Println(err)
-			return c.JSON(500, echo.Map{
-				"message": "failed get sheets Front-end",
-			})
-		}
-
-		for i := int(counter); i < len(FES); i++ {
-			counter++
-
-			if len(FES[i]) > 1 {
-				// setData
-				data := entities.FrontEnd{
-					ID:             counter,
-					CompanyName:    FES[i][0],
-					JobPosition:    FES[i][1],
-					WorkType:       FES[i][2],
-					TechStack:      FES[i][3],
-					LinkToJob:      FES[i][4],
-					TimeFrontendID: waktuID,
-				}
-
-				tx := db.Save(&data)
-				if tx.Error != nil {
-					fmt.Println("ERROR : ", tx.Error.Error())
-				}
-			} else {
-				// setId
-				waktuID = counter
-
-				// setData
-				data := entities.TimeFrontend{
-					ID:   counter,
-					Name: FES[i][0],
-				}
-
-				tx := db.Save(&data)
-				if tx.Error != nil {
-					fmt.Println("ERROR : ", tx.Error.Error())
-				}
-			}
-
-		}
-
-		// resetUlang
-		counter = config.GetConfig().QA_Index
-
-		QAS, err := f.GetRows("Quality")
-		if err != nil {
-			fmt.Println(err)
-			return c.JSON(500, echo.Map{
-				"message": "failed get sheets Quality",
-			})
-		}
-
-		for i := int(counter); i < len(QAS); i++ {
-			counter++
-
-			if len(QAS[i]) > 1 {
-				// setData
-				data := entities.Quality{
-					ID:            counter,
-					CompanyName:   QAS[i][0],
-					JobPosition:   QAS[i][1],
-					WorkType:      QAS[i][2],
-					TechStack:     QAS[i][3],
-					LinkToJob:     QAS[i][4],
-					TimeQualityID: waktuID,
-				}
-
-				tx := db.Save(&data)
-				if tx.Error != nil {
-					fmt.Println("ERROR : ", tx.Error.Error())
-				}
-			} else {
-				// setId
-				waktuID = counter
-
-				// setData
-				data := entities.TimeQuality{
-					ID:   counter,
-					Name: QAS[i][0],
-				}
-
-				tx := db.Save(&data)
-				if tx.Error != nil {
-					fmt.Println("ERROR : ", tx.Error.Error())
-				}
-			}
-
-		}
-
-		return c.JSON(200, echo.Map{
-			"message": "data berhasil diupdate",
-		})
-	}, middleware.BasicAuth(Login))
-
-	e.GET("/data/back-end/last", func(c echo.Context) error {
-		var result entities.TimeBackend
-
-		db.Preload("BackEnds").Last(&result)
-
-		return c.JSON(200, echo.Map{
-			"data": result,
-		})
-	})
-
-	e.GET("/data/front-end/last", func(c echo.Context) error {
-		var result entities.TimeFrontend
-
-		db.Preload("FrontEnds").Last(&result)
-
-		return c.JSON(200, echo.Map{
-			"data": result,
-		})
-	})
-
-	e.GET("/data/quality/last", func(c echo.Context) error {
-		var result entities.TimeQuality
-
-		db.Preload("Qualitys").Last(&result)
-
-		return c.JSON(200, echo.Map{
-			"data": result,
-		})
-	})
-
-	e.GET("/data/front-end", func(c echo.Context) error {
-		ql := c.QueryParam("limit")
-		setLimit, err := strconv.Atoi(ql)
-		if err != nil {
-			return c.Redirect(301, config.PageLimit("front-end"))
-		}
-
-		qp := c.QueryParam("page")
-		setPage, err := strconv.Atoi(qp)
-		if err != nil {
-			return c.Redirect(301, config.PageLimit("front-end"))
-		}
-
-		var results []entities.FrontEnd
-
-		Offset := (setPage - 1) * setLimit
-		db.Limit(setLimit).Offset(Offset).Order("id desc").Find(&results)
-
-		return c.JSON(200, echo.Map{
-			"data": results,
-		})
-	})
-
-	e.GET("/data/back-end", func(c echo.Context) error {
-		ql := c.QueryParam("limit")
-		setLimit, err := strconv.Atoi(ql)
-		if err != nil {
-			return c.Redirect(301, config.PageLimit("back-end"))
-		}
-
-		qp := c.QueryParam("page")
-		setPage, err := strconv.Atoi(qp)
-		if err != nil {
-			return c.Redirect(301, config.PageLimit("back-end"))
-		}
-
-		var results []entities.BackEnd
-
-		Offset := (setPage - 1) * setLimit
-		db.Limit(setLimit).Offset(Offset).Order("id desc").Find(&results)
-
-		return c.JSON(200, echo.Map{
-			"data": results,
-		})
-	})
-
-	e.GET("/data/quality", func(c echo.Context) error {
-		ql := c.QueryParam("limit")
-		setLimit, err := strconv.Atoi(ql)
-		if err != nil {
-			return c.Redirect(301, config.PageLimit("quality"))
-		}
-
-		qp := c.QueryParam("page")
-		setPage, err := strconv.Atoi(qp)
-		if err != nil {
-			return c.Redirect(301, config.PageLimit("quality"))
-		}
-
-		var results []entities.Quality
-
-		Offset := (setPage - 1) * setLimit
-		db.Limit(setLimit).Offset(Offset).Order("id desc").Find(&results)
-
-		return c.JSON(200, echo.Map{
-			"data": results,
-		})
-	})
-
-	e.Logger.Fatal(e.Start(fmt.Sprintf(":%s", config.GetConfig().Port)))
-}
-
-func Login(username string, password string, e echo.Context) (bool, error) {
-	if username == config.GetConfig().Basic_Username && password == config.GetConfig().Basic_Password {
-		return true, nil
+	// Membuat koneksi ke database MySQL
+	dsn := "root:@tcp(localhost:3306)/job_vacancies_v2?charset=utf8mb4&parseTime=True&loc=Local"
+	var err error
+	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		panic(err)
 	}
 
-	return false, errors.New("credentials is not valid")
+	// Migrasi tabel
+	db.AutoMigrate(&Job{}, &BEJob{}, &FEJob{}, &QEJob{})
+
+	// Inisialisasi Echo framework
+	e := echo.New()
+
+	// Mengatur route dan handler untuk endpoint tertentu
+	repo := NewRepo(db)
+	service := NewService(repo)
+
+	e.GET("/jobs", getJobs)
+	e.GET("/jobs/:id", getJob)
+	e.POST("/jobs", service.createJob)
+
+	// Menjalankan server pada port 8000
+	e.Start(":8000")
+}
+
+type Response struct {
+	Status    int         `json:"status"`
+	Message   string      `json:"message"`
+	TotalData int         `json:"totalData,omitempty"`
+	Data      interface{} `json:"data,omitempty"`
+}
+
+type Information struct {
+	Key  string `json:"key"`
+	Data string `json:"data"`
+}
+
+type repo struct {
+	db *gorm.DB
+}
+
+func NewRepo(db *gorm.DB) *repo {
+	return &repo{db}
+}
+
+type Repo interface {
+	dataBE(first, totalData int, data [][]string, author string) error
+	dataFE(first, totalData int, data [][]string, author string) error
+	dataQE(first, totalData int, data [][]string, author string) error
+}
+
+func parseTime(input string) (time.Time, error) {
+	var filterDate string
+
+	// checkInput
+	if input == "" {
+		return time.Now(), nil
+	}
+
+	filterDate = strings.ReplaceAll(input, " ", "-")
+	filterDate = strings.ReplaceAll(filterDate, "\\", "")
+
+	if len(input) == 10 {
+		filterDate = fmt.Sprintf("0%s", filterDate)
+	}
+
+	res, err := time.Parse("02-Jan-2006", filterDate)
+	if err != nil {
+		return time.Now(), err
+	}
+
+	return res, nil
+}
+
+func generateCode(input string) string {
+	canonicID, err := nanoid.Standard(21)
+	if err != nil {
+		panic(err)
+	}
+
+	return fmt.Sprintf("%s-%s-%s", input, uuid.New().String(), canonicID())
+}
+
+func (r *repo) dataBE(first, totalData int, req [][]string, author string) error {
+	var jobs []BEJob
+
+	for i := first; i < totalData; i++ {
+		var job BEJob
+
+		date, err := parseTime(req[i][0])
+		if err != nil {
+			return fmt.Errorf("parse time : %v", err.Error())
+		}
+
+		job.DataID = generateCode("BE")
+		job.Date = date
+		job.CompanyName = req[i][1]
+		job.JobPosition = req[i][2]
+		job.WorkType = req[i][3]
+		job.TechStack = req[i][4]
+		job.LinkToJob = req[i][5]
+
+		if len(req[i]) == 10 {
+			job.Industry = req[i][9]
+		}
+
+		jobs = append(jobs, job)
+	}
+
+	data := Job{
+		Author:   author,
+		Backends: jobs,
+	}
+
+	err := r.db.Create(&data).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *repo) dataFE(first, totalData int, req [][]string, author string) error {
+	var jobs []FEJob
+
+	for i := first; i < totalData; i++ {
+		var job FEJob
+
+		date, err := parseTime(req[i][0])
+		if err != nil {
+			return fmt.Errorf("parse time : %v", err.Error())
+		}
+
+		job.DataID = generateCode("FE")
+		job.Date = date
+		job.CompanyName = req[i][1]
+		job.JobPosition = req[i][2]
+		job.WorkType = req[i][3]
+		job.TechStack = req[i][4]
+		job.LinkToJob = req[i][5]
+
+		if len(req[i]) == 10 {
+			job.Industry = req[i][9]
+		}
+
+		jobs = append(jobs, job)
+	}
+
+	data := Job{
+		Author:    author,
+		Frontends: jobs,
+	}
+
+	err := r.db.Create(&data).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *repo) dataQE(first, totalData int, req [][]string, author string) error {
+	var jobs []QEJob
+
+	for i := first; i < totalData; i++ {
+		var job QEJob
+
+		date, err := parseTime(req[i][0])
+		if err != nil {
+			return fmt.Errorf("parse time : %v", err.Error())
+		}
+
+		job.DataID = generateCode("QE")
+		job.Date = date
+		job.CompanyName = req[i][1]
+		job.JobPosition = req[i][2]
+		job.WorkType = req[i][3]
+		job.TechStack = req[i][4]
+		job.LinkToJob = req[i][5]
+
+		if len(req[i]) == 10 {
+			job.Industry = req[i][9]
+		}
+
+		jobs = append(jobs, job)
+	}
+
+	data := Job{
+		Author:    author,
+		Qualities: jobs,
+	}
+
+	err := r.db.Create(&data).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+type service struct {
+	r Repo
+}
+
+func NewService(r Repo) *service {
+	return &service{r}
+}
+
+func (s *service) createJob(c echo.Context) error {
+	var req Information
+
+	err := c.Bind(&req)
+	if err != nil {
+		log.Println(err.Error())
+
+		return c.JSON(http.StatusBadRequest, Response{
+			Status:  400,
+			Message: "Bad Request. Name and Key is Required",
+		})
+	}
+
+	var dataStruct interface{}
+
+	switch req.Key {
+	case "2023 BE":
+		dataStruct = &BEJob{}
+	case "2023 FE":
+		dataStruct = &FEJob{}
+	case "2023 QE":
+		dataStruct = &QEJob{}
+	default:
+		return c.JSON(http.StatusBadRequest, Response{
+			Status:  400,
+			Message: "Bad Request. Name and Key is Required",
+		})
+	}
+
+	ctx := context.Background()
+	sheetsService, err := sheets.NewService(ctx, option.WithAPIKey("API_KEY"))
+	if err != nil {
+		log.Println(err.Error())
+
+		return c.JSON(http.StatusInternalServerError, Response{
+			Status:  500,
+			Message: "Internal Server Error",
+		})
+	}
+
+	// ID spreadsheet yang ingin diakses
+	spreadsheetID := "SHEET_ID"
+
+	// Range dari data yang ingin diambil (misalnya, "Sheet1!A1:E10")
+	readRange := fmt.Sprintf("'%s'!A:J", req.Key)
+
+	// Mengambil data dari spreadsheet
+	resp, err := sheetsService.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
+	if err != nil {
+		log.Println(err.Error())
+
+		return c.JSON(http.StatusInternalServerError, Response{
+			Status:  500,
+			Message: "Internal Server Error",
+		})
+	}
+
+	jsonData, err := resp.MarshalJSON()
+	if err != nil {
+		log.Println(err.Error())
+
+		return c.JSON(http.StatusInternalServerError, Response{
+			Status:  500,
+			Message: "Internal Server Error",
+		})
+	}
+
+	var result Data
+	err = json.Unmarshal(jsonData, &result)
+	if err != nil {
+		log.Println(err.Error())
+
+		return c.JSON(http.StatusInternalServerError, Response{
+			Status:  500,
+			Message: "Internal Server Error",
+		})
+	}
+
+	// total Input
+	var dataNow int64
+	db.Find(dataStruct).Count(&dataNow)
+
+	dataNow += 2
+
+	// changeType
+	first := int(dataNow)
+
+	totalData := len(result.Data)
+
+	if first == totalData {
+		return c.JSON(http.StatusNotFound, Response{
+			Status:    404,
+			Message:   "Data already Updated",
+			TotalData: first,
+		})
+	}
+
+	switch req.Key {
+	case "2023 BE":
+		err = s.r.dataBE(first, totalData, result.Data, req.Data)
+	case "2023 FE":
+		err = s.r.dataFE(first, totalData, result.Data, req.Data)
+	case "2023 QE":
+		err = s.r.dataQE(first, totalData, result.Data, req.Data)
+	}
+
+	if err != nil {
+		log.Println(err.Error())
+
+		return c.JSON(http.StatusInternalServerError, Response{
+			Status:  500,
+			Message: "Internal Server Error",
+		})
+	}
+
+	return c.JSON(http.StatusCreated, Response{
+		Status:    201,
+		Message:   "Created. Success Seeder",
+		TotalData: totalData,
+	})
+}
+
+type Data struct {
+	MajorDimension string     `json:"majorDimension"`
+	Range          string     `json:"range"`
+	Data           [][]string `json:"values"`
+}
+
+type Model interface {
+	Find() []interface{}
+}
+
+type Job struct {
+	gorm.Model `json:"-"`
+	Author     string  `json:"author"`
+	Backends   []BEJob `json:"backends"`
+	Frontends  []FEJob `json:"frontends"`
+	Qualities  []QEJob `json:"qualities"`
+}
+
+func getJobs(c echo.Context) error {
+	name := c.QueryParam("type")
+
+	var data interface{}
+	var errors error
+
+	switch name {
+	case "backend":
+		data = []BEJob{}
+
+		err := db.Order("date DESC").Find(&data).Error
+		if err != nil {
+			errors = err
+		}
+	case "frontend":
+		data = []FEJob{}
+
+		err := db.Order("date DESC").Find(&data).Error
+		if err != nil {
+			errors = err
+		}
+	case "quality":
+		data = []QEJob{}
+
+		err := db.Order("date DESC").Find(&data).Error
+		if err != nil {
+			errors = err
+		}
+	default:
+		var all []Job
+
+		err := db.Preload("Backends", func(db *gorm.DB) *gorm.DB {
+			return db.Order("date DESC")
+		}).Preload("Frontends", func(db *gorm.DB) *gorm.DB {
+			return db.Order("date DESC")
+		}).Preload("Qualities", func(db *gorm.DB) *gorm.DB {
+			return db.Order("date DESC")
+		}).Find(&all).Error
+
+		if err != nil {
+			errors = err
+		}
+
+		data = all
+	}
+
+	if errors != nil {
+		return c.JSON(http.StatusInternalServerError, Response{
+			Status:  500,
+			Message: "Internal Server Error",
+		})
+	}
+
+	return c.JSON(http.StatusOK, Response{
+		Status:  200,
+		Message: "OK. Get All Data",
+		Data:    data,
+	})
+}
+
+func getJob(c echo.Context) error {
+	id := c.Param("id")
+	name := c.QueryParam("type")
+
+	var data interface{}
+
+	switch name {
+	case "backend":
+		data = &BEJob{}
+	case "frontend":
+		data = &FEJob{}
+	case "quality":
+		data = &QEJob{}
+	default:
+		return c.JSON(http.StatusNotFound, Response{
+			Status:  404,
+			Message: "Data Not Found",
+		})
+	}
+
+	err := db.First(&data, "data_id = ?", id).Error
+	if err != nil {
+		log.Println(err.Error())
+
+		return c.JSON(http.StatusInternalServerError, Response{
+			Status:  500,
+			Message: "Internal Server Error",
+		})
+	}
+
+	return c.JSON(http.StatusOK, Response{
+		Status:  200,
+		Message: "OK. Get Data by Id",
+		Data:    data,
+	})
 }

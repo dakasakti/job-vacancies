@@ -1,6 +1,6 @@
 # Post Job Vacancies
 
-## Feature
-- Create File
-- Update Database
-- Read posts
+## Feature v2
+
+- Create Seeders
+- Read Jobs
